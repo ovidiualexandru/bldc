@@ -29,8 +29,8 @@
 #define BAUDRATE					115200
 
 // Threads
-static THD_FUNCTION(packet_process_thread, arg);
-static THD_WORKING_AREA(packet_process_thread_wa, 4096);
+static THD_FUNCTION(saber_process_thread, arg);
+static THD_WORKING_AREA(saber_process_thread_wa, 4096);
 static thread_t *process_tp = 0;
 static int32_t rpm;
 
@@ -80,7 +80,7 @@ static bool this_driver(uint8_t c)
 static int32_t get_rpm_info_from_saber_char(uint8_t c)
 {
     uint8_t byteval = c & (~DRIVER_MASK); /* remove the driver id bit */
-    int32_t x = ((int32_t)byteval - (int32_t)DRIVER_MASK) * MOTOR_RPM_SCALE;
+    int32_t x = ((int32_t)byteval - (int32_t)DRIVER_COMM_OFFSET) * MOTOR_RPM_SCALE;
     return x;
 }
 
@@ -123,15 +123,15 @@ static UARTConfig uart_cfg = {
 
 void app_custom_start(void) {
 	if (!is_running) {
-		chThdCreateStatic(packet_process_thread_wa, sizeof(packet_process_thread_wa),
-				NORMALPRIO, packet_process_thread, NULL);
+		chThdCreateStatic(saber_process_thread_wa, sizeof(saber_process_thread_wa),
+				NORMALPRIO, saber_process_thread, NULL);
 		is_running = true;
 	}
 
 	uartStart(&HW_UART_DEV, &uart_cfg);
-	// palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
-			// PAL_STM32_OSPEED_HIGHEST |
-			// PAL_STM32_PUDR_PULLUP);
+	palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
+			PAL_STM32_OSPEED_HIGHEST |
+			PAL_STM32_PUDR_PULLUP);
 	palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
 			PAL_STM32_OSPEED_HIGHEST |
 			PAL_STM32_PUDR_PULLUP);
@@ -139,7 +139,7 @@ void app_custom_start(void) {
 
 void app_custom_stop(void) {
 	uartStop(&HW_UART_DEV);
-	// palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_INPUT_PULLUP);
+	palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_INPUT_PULLUP);
 	palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_INPUT_PULLUP);
 
 	// Notice that the processing thread is kept running in case this call is made from it.
@@ -157,7 +157,7 @@ void app_custom_configure(app_configuration *conf) {
 	// }
 }
 
-static THD_FUNCTION(packet_process_thread, arg) {
+static THD_FUNCTION(saber_process_thread, arg) {
 	(void)arg;
 
 	chRegSetThreadName("Saber simplified");
@@ -167,7 +167,14 @@ static THD_FUNCTION(packet_process_thread, arg) {
 	for(;;) {
 		chEvtWaitAny((eventmask_t) 1);
         /* a new rpm reference has been set, process it */
+        static uint8_t buffer[4] = "c \r\l";
         mc_interface_set_pid_speed(rpm);
+        
+        while (HW_UART_DEV.txstate == UART_TX_ACTIVE) {
+            chThdSleep(1);
+        }
+        buffer[1] = (uint8_t) rpm;
+        uartStartSend(&HW_UART_DEV, 4, buffer);
         // TODO: check if brakes need to be enabled
     }
 }
