@@ -95,7 +95,9 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
     if (this_driver((uint8_t)c)){
         /* extract the rpm info from c */
         rpm = get_rpm_info_from_saber_char((uint8_t)c);
+        chSysLockFromISR();
         chEvtSignalI(process_tp, (eventmask_t) 1);
+        chSysUnlockFromISR();
     }
 }
 
@@ -135,6 +137,7 @@ void app_custom_start(void) {
 	palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
 			PAL_STM32_OSPEED_HIGHEST |
 			PAL_STM32_PUDR_PULLUP);
+    uartStartSend(&HW_UART_DEV, 5, "Hello ");
 }
 
 void app_custom_stop(void) {
@@ -167,7 +170,7 @@ static THD_FUNCTION(saber_process_thread, arg) {
 	for(;;) {
 		chEvtWaitAny((eventmask_t) 1);
         /* a new rpm reference has been set, process it */
-        static uint8_t buffer[4] = "c \r\l";
+        static uint8_t buffer[4] = "c \n";
         mc_interface_set_pid_speed(rpm);
         
         while (HW_UART_DEV.txstate == UART_TX_ACTIVE) {
