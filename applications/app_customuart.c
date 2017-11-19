@@ -25,6 +25,11 @@
 
 #include <string.h>
 
+// define the debug symbol if need to debug this app
+#define APP_CUSTOMUART_DEBUG
+// Uncomment next line to use rpm based control
+// #define MOTOR_CONTROL_RPM
+
 // Settings
 #define BAUDRATE					115200
 
@@ -32,7 +37,7 @@
 static THD_FUNCTION(saber_process_thread, arg);
 static THD_WORKING_AREA(saber_process_thread_wa, 4096);
 static thread_t *process_tp = 0;
-static int32_t rpm;
+static uint8_t driver_id;
 
 // Variables
 static volatile bool is_running = false;
@@ -62,27 +67,75 @@ static void rxerr(UARTDriver *uartp, uartflags_t e) {
 }
 
 #define DRIVER_MASK (0x80u)
-#define DRIVER_ID (0x80u) // TODO: this should be configurable
 #define DRIVER_COMM_OFFSET (64) // subtract this value to center on zero
-#define MOTOR_RPM_SCALE (126) // TODO: this should be configurable
+#define DRIVER_GLOBAL_STOPCMD (0u)
 
 /*
  * Check if the received byte is intended for this driver
  */
 static bool this_driver(uint8_t c)
 {
-    return ((c & DRIVER_MASK) == DRIVER_ID);
+    /* for saber simplified serial, the driver id is embedded in the MSB of the
+     command char. Use a NOT XOR function to check the driver id
+     DRIVER ID  | cmd MSB   | Result
+     -----------+-----------+----
+     0          | 0         | 1
+     0          | 1         | 0
+     1          | 0         | 0
+     1          | 1         | 1
+    */
+    if (c == DRIVER_GLOBAL_STOPCMD){
+        /* if the global stop cmd has been issues, listen to it */
+        return true;
+    }
+    uint8_t msb = (uint8_t) ((c >> 7u) & (0x01u));
+    return ( (!(msb ^ driver_id)) ? true : false);
 }
 
+#ifdef MOTOR_CONTROL_RPM /* Use RPM control */
+
+#define MOTOR_RPM_SCALE (126) // TODO: this should be configurable
+static int32_t rpm;
 /*
  * Extract the rpm in the byte, scale it to an rpm value
  */
 static int32_t get_rpm_info_from_saber_char(uint8_t c)
 {
+    if (c == DRIVER_GLOBAL_STOPCMD){
+        /* if the global stop cmd has been issues, set rpm to 0 */
+        return 0u;
+    }
     uint8_t byteval = c & (~DRIVER_MASK); /* remove the driver id bit */
     int32_t x = ((int32_t)byteval - (int32_t)DRIVER_COMM_OFFSET) * MOTOR_RPM_SCALE;
     return x;
 }
+
+#else /* Use duty cycle control*/
+
+#define MOTOR_DUTY_SCALE (1.0f / 63) // scale from byte command to floats
+static float duty = 0.0f;
+/*
+ * Extract the rpm in the byte, scale it to an rpm value
+ */
+static float get_dutycycle_info_from_saber_char(uint8_t c)
+{
+    if (c == DRIVER_GLOBAL_STOPCMD){
+        /* if the global stop cmd has been issues, set cmd to 0 */
+        return 0u;
+    }
+    uint8_t byteval = c & (~DRIVER_MASK); /* remove the driver id bit */
+    /* convert the byte char into zero-centered int */
+    int32_t x = ((int32_t)byteval - (int32_t)DRIVER_COMM_OFFSET);
+    float cmd = ((float)x) * MOTOR_DUTY_SCALE;
+    // make sure commands are in a valid range 
+    if (cmd > 1.0f) cmd = 1.0f;
+    if (cmd < 1.0f) cmd = -1.0f;
+    return cmd;
+}
+
+#endif /* MOTOR_CONTROL_RPM */
+
+
 
 /*
  * This callback is invoked when a character is received but the application
@@ -93,8 +146,12 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
     /* Check the driver id - MSB of c */
 	(void)uartp;
     if (this_driver((uint8_t)c)){
-        /* extract the rpm info from c */
+        /* extract the info from c */
+#ifdef MOTOR_CONTROL_RPM
         rpm = get_rpm_info_from_saber_char((uint8_t)c);
+#else
+        duty = get_dutycycle_info_from_saber_char((uint8_t)c);
+#endif
         chSysLockFromISR();
         chEvtSignalI(process_tp, (eventmask_t) 1);
         chSysUnlockFromISR();
@@ -137,7 +194,10 @@ void app_custom_start(void) {
 	palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
 			PAL_STM32_OSPEED_HIGHEST |
 			PAL_STM32_PUDR_PULLUP);
+            
+#ifdef APP_CUSTOMUART_DEBUG
     uartStartSend(&HW_UART_DEV, 5, "Hello ");
+#endif
 }
 
 void app_custom_stop(void) {
@@ -150,14 +210,16 @@ void app_custom_stop(void) {
 
 
 void app_custom_configure(app_configuration *conf) {
-    (void) conf;
-    /* TODO: configure the driver id (MSB mask) and rpm scale */
-    
-	// uart_cfg.speed = baudrate;
-
-	// if (is_running) {
-		// uartStart(&HW_UART_DEV, &uart_cfg);
-	// }
+    // use the baudrate set from the VESC tool for UART
+	uart_cfg.speed = conf->app_uart_baudrate;
+	if (is_running) {
+		uartStart(&HW_UART_DEV, &uart_cfg);
+	}
+    /* load the driver ID from the CAN ID
+     CAN ID = 0 -> driver id = 0
+     CAND ID != 0 -> driver id = 1
+    */
+    driver_id = (conf->controller_id == 0u) ? 0u : 1u;
 }
 
 static THD_FUNCTION(saber_process_thread, arg) {
@@ -169,15 +231,19 @@ static THD_FUNCTION(saber_process_thread, arg) {
 
 	for(;;) {
 		chEvtWaitAny((eventmask_t) 1);
-        /* a new rpm reference has been set, process it */
-        static uint8_t buffer[4] = "c \n";
+        /* a new command has been set, process it */
+#ifdef MOTOR_CONTROL_RPM
         mc_interface_set_pid_speed(rpm);
-        
+#else
+        mc_interface_set_duty(duty);
+#endif
+#ifdef APP_CUSTOMUART_DEBUG
+        static uint8_t buffer[3] = "r\n";
         while (HW_UART_DEV.txstate == UART_TX_ACTIVE) {
             chThdSleep(1);
         }
-        buffer[1] = (uint8_t) rpm;
-        uartStartSend(&HW_UART_DEV, 4, buffer);
+        uartStartSend(&HW_UART_DEV, 3, buffer);
+#endif
         // TODO: check if brakes need to be enabled
     }
 }
