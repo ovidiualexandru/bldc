@@ -112,8 +112,8 @@ static int32_t get_rpm_info_from_saber_char(uint8_t c)
 
 #else /* Use duty cycle control*/
 
-#define MOTOR_DUTY_SCALE (1.0f / 63) // scale from byte command to floats
-static float duty = 0.0f;
+#define MOTOR_DUTY_SCALE (1.0 / 63) // scale from byte command to floats
+static float duty = 0.0;
 /*
  * Extract the rpm in the byte, scale it to an rpm value
  */
@@ -128,8 +128,8 @@ static float get_dutycycle_info_from_saber_char(uint8_t c)
     int32_t x = ((int32_t)byteval - (int32_t)DRIVER_COMM_OFFSET);
     float cmd = ((float)x) * MOTOR_DUTY_SCALE;
     // make sure commands are in a valid range 
-    if (cmd > 1.0f) cmd = 1.0f;
-    if (cmd < 1.0f) cmd = -1.0f;
+    if (cmd > 1.0) cmd = 1.0;
+    if (cmd < 1.0) cmd = -1.0;
     return cmd;
 }
 
@@ -235,7 +235,7 @@ static THD_FUNCTION(saber_process_thread, arg) {
 #ifdef MOTOR_CONTROL_RPM
         mc_interface_set_pid_speed(rpm);
 #else
-        mc_interface_set_duty(duty);
+        mc_interface_set_duty_noramp(duty);
 #endif
 #ifdef APP_CUSTOMUART_DEBUG
         static uint8_t buffer[3] = "r\n";
