@@ -45,7 +45,7 @@ is documented as being for motor 1 and command 7 for motor 2.
 we'll use the VESC CAN ID to indicate if the current VESC is for Motor 1 or Motor 2.
 We'll use:
  CAN ID = 0 for Motor 1
- CAN ID != 1 for Motor 2
+ CAN ID != 0 for Motor 2
 The default address is fixed at 128. A potential extension is described below.
 ----
     TODO: extend the CAN ID usage for multiple Saber addresses. Example:
@@ -53,7 +53,7 @@ The default address is fixed at 128. A potential extension is described below.
     CAN_ID = 1 -> Saber 128, M2
     CAN_ID = 2 -> Saber 129, M1
     CAN_ID = 3 -> Saber 129, M2
-    and so on..
+    and so on...
 ----
 
 = Implementation
@@ -134,12 +134,95 @@ static bool valid_checksum(void)
     return false;
 }
 
-// add a char in to the buffer
+// add a char into the buffer
 static void buff_add_char(uint8_t c)
 {
     buff[buff_idx] = c;
     buff_idx = BUFFER_INC_IDX(buff_idx);
 }
+
+// UART callbacks
+
+/*
+ * This callback is invoked when a transmission buffer has been completely
+ * read by the driver.
+ */
+static void txend1(UARTDriver *uartp) {
+	(void)uartp;
+}
+
+/*
+ * This callback is invoked when a transmission has physically completed.
+ */
+static void txend2(UARTDriver *uartp) {
+	(void)uartp;
+}
+
+/*
+ * This callback is invoked on a receive error, the errors mask is passed
+ * as parameter.
+ */
+static void rxerr(UARTDriver *uartp, uartflags_t e) {
+	(void)uartp;
+	(void)e;
+}
+/*
+ * This callback is invoked when a character is received but the application
+ * was not ready to receive it, the character is passed as parameter.
+ */
+static void rxchar(UARTDriver *uartp, uint16_t c) {
+    /* Process the characted */
+	(void)uartp;
+    buff_add_char((uint8_t)c);
+    if(valid_checksum()){
+        /* Nice, we received a valid data packet, process it */
+        uint8_t id = buff_idx; // now buff_idx will be pointing to the first element of the data packet, the driver address
+        uint8_t saber_address = buff[id];
+        id = BUFFER_INC_IDX(id);
+        uint8_t cmd = buff[id];
+        id = BUFFER_INC_IDX(id);
+        uint8_t payload = buff[id];
+        /* check saber address and motor id, compare with CAN ID */
+        if (driver_id_correct(can_id, saber_address, cmd)){
+            /* extract the command type and the payload */
+            if (cmd == 0 || cmd == 4){ /* Drive forward motor */
+                
+            } else if (cmd == 1 || cmd == 5){ /* Drive backwards motor */
+                
+            } else if (cmd == 6 || cmd == 7){ /* Drive motor 7 bit */
+                
+            }
+            else {
+                /* Panic! Invalid command. */
+                /* Go directly to Jail. Do not pass Go. Do not collect $200. */
+                return;
+            }
+        }
+        
+        /* write to output and wake up thread */
+        
+        chSysLockFromISR();
+        /*TODO: write eventmask with either 1 or 2, depending on control mode
+         (duty-cycle for brushed, RPM for BLDC) */
+        chEvtSignalI(process_tp, (eventmask_t) 1);
+        chSysUnlockFromISR();
+    }
+}
+
+/*
+ * UART driver configuration structure.
+ */
+static UARTConfig uart_cfg = {
+		txend1,
+		txend2,
+		rxend,
+		rxchar,
+		rxerr,
+		BAUDRATE,
+		0,
+		USART_CR2_LINEN,
+		0
+};
 
 void app_custom_start(void) {
 }
