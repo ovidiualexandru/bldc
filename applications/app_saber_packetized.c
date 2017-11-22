@@ -66,6 +66,12 @@ For brushed DC motors we'll use duty-cycle control, and for BLDC or FOC we'll us
 control. The RPM value is computed by multiplying the received data packet with a 
 constant defined in this file.
 
+To optimize the rx ISR, we'll save the received data to an intermediate value.
+Since the best resolution for the packetized protocol is 7 + 1 sign bit, we'll
+save the received value to signed 8 bit variable.
+To optimize thread behavior, we'll compare new data to the value that is already
+saved, and wake-up the thread only if they are different.
+
 == Decode algorithm
 -------------------
   ____________________
@@ -109,6 +115,13 @@ received char. Also, we'll use a pull-down for safety reasons.
 #define BUFFER_INC_IDX(x) (((x) + 1u) % BUFFER_LEN)
 static uint8_t buff[BUFFER_LEN]; /* The circular buffer */
 static uint8_t buff_idx; /* Buffer pointer: next index to write in the buffer */
+
+static volatile int8_t crt_command; /* store the current command */
+
+/* Thread */
+static THD_FUNCTION(saber_process_thread, arg);
+static THD_WORKING_AREA(saber_process_thread_wa, 4096);
+static thread_t *process_tp = 0;
 
 /* Helper functions */
 
@@ -182,15 +195,16 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
         uint8_t cmd = buff[id];
         id = BUFFER_INC_IDX(id);
         uint8_t payload = buff[id];
+        int8_t next_command = 0u;
         /* check saber address and motor id, compare with CAN ID */
         if (driver_id_correct(can_id, saber_address, cmd)){
             /* extract the command type and the payload */
             if (cmd == 0 || cmd == 4){ /* Drive forward motor */
-                
+                /* 7bit magnitudine, positive */
             } else if (cmd == 1 || cmd == 5){ /* Drive backwards motor */
-                
+                /* 7bit magnitude, negative */
             } else if (cmd == 6 || cmd == 7){ /* Drive motor 7 bit */
-                
+                /* 0 is full reverse, 127 full forward, 64 is stop */
             }
             else {
                 /* Panic! Invalid command. */
@@ -199,13 +213,15 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
             }
         }
         
-        /* write to output and wake up thread */
-        
-        chSysLockFromISR();
-        /*TODO: write eventmask with either 1 or 2, depending on control mode
-         (duty-cycle for brushed, RPM for BLDC) */
-        chEvtSignalI(process_tp, (eventmask_t) 1);
-        chSysUnlockFromISR();
+        if (next_command != crt_command){
+            /* the current command needs to be changed */
+            crt_command = next_command;
+            chSysLockFromISR();
+            /*TODO: write eventmask with either 1 or 2, depending on control mode
+             (duty-cycle for brushed, RPM for BLDC) */
+            chEvtSignalI(process_tp, (eventmask_t) 1);
+            chSysUnlockFromISR();
+        }
     }
 }
 
@@ -233,4 +249,25 @@ void app_custom_stop(void) {
 
 void app_custom_configure(app_configuration *conf) {
     (void)conf;
+    /* TODO: read the current motor configuration, save mc_motor_type */
+}
+
+static THD_FUNCTION(saber_process_thread, arg) {
+	(void)arg;
+
+	chRegSetThreadName("Saber packetized");
+
+	process_tp = chThdGetSelfX();
+
+	for(;;) {
+		chEvtWaitAny((eventmask_t) 1);
+        
+        if (crt_command == 0){
+            /* set the brakes */
+            mc_interface_brake_now();
+        }
+        else{
+            
+        }
+    }
 }
