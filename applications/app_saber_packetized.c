@@ -316,6 +316,11 @@ void app_custom_start(void) {
 }
 
 void app_custom_stop(void) {
+    uartStop(&HW_UART_DEV);
+    palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_INPUT_PULLUP);
+    palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_INPUT_PULLUP);
+
+    // Notice that the processing thread is kept running in case this call is made from it.
 }
 
 
