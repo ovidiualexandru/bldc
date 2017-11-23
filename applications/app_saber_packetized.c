@@ -106,8 +106,22 @@ received char. Also, we'll use a pull-down for safety reasons.
 
 */
 
+#include "app.h"
+#include "ch.h"
+#include "hal.h"
+#include "hw.h"
+#include "mc_interface.h"
+#include "datatypes.h"
+
 /* checksum mask defined for the saber protocol */
 #define CHECKSUM_MASK (0x7Fu)
+
+/* duty-cycle definitions */
+#define DRIVER_COMM_OFFSET (64) // subtract this value to center on zero
+#define MOTOR_DUTY_SCALE (1.0 / 63) // scale from byte command to floats
+
+/* rpm control definitions */
+#define MOTOR_RPM_SCALE (126) // TODO: this should be configurable
 
 /* Circular buffer length */
 #define BUFFER_LEN (4u)
@@ -116,6 +130,8 @@ received char. Also, we'll use a pull-down for safety reasons.
 static uint8_t buff[BUFFER_LEN]; /* The circular buffer */
 static uint8_t buff_idx; /* Buffer pointer: next index to write in the buffer */
 
+static volatile mc_motor_type motortype = MOTOR_TYPE_DC; /* save motor type */
+static volatile uint8_t controlled_id; /* can id */
 static volatile int8_t crt_command; /* store the current command */
 
 /* Thread */
@@ -133,6 +149,7 @@ static bool valid_checksum(void)
     uint8_t idx = buff_idx;
     uint8_t sum;
     uint8_t i;
+    bool chk = false;
     /* Iterate over the first three chars, and verify checksum */
     for (i = 0u; i < (BUFFER_LEN - 1u); i++){
         sum += buff[idx];
@@ -142,9 +159,9 @@ static bool valid_checksum(void)
     to the latest char in the buffer */
     uint8_t checksum = (uint8_t)(sum & CHECKSUM_MASK);
     if (checksum == buff[idx]){
-        return true;
+        chk = true;
     }
-    return false;
+    return chk;
 }
 
 // add a char into the buffer
@@ -152,6 +169,28 @@ static void buff_add_char(uint8_t c)
 {
     buff[buff_idx] = c;
     buff_idx = BUFFER_INC_IDX(buff_idx);
+}
+
+// compare the saber adress and cmd with the can id to see if this vesc is addressed 
+static bool driver_id_correct(uint8_t can_id, uint8_t saber_address, uint8_t cmd)
+{
+    if (saber_address < 128u) return false; //input sanitization
+    uint8_t x = saber_address - 128u;
+    uint8_t y = can_id & 1u; //M1 is for CAN IS LSB = 0, M2 is for CAN ID LSB = 1
+    uint8_t z = can_id >> 1u; // remove the LSB
+    if (x == z){
+        if ((y == 0u) && 
+                ((cmd == 0u) || (cmd == 1u) || (cmd == 7u) || )
+            ){
+            return true;
+        }
+        if ((y == 1u) && 
+                ((cmd == 4u) || (cmd == 5u) || (cmd == 6u) || )
+            ){
+            return true;
+        }
+    }
+    return false;
 }
 
 // UART callbacks
@@ -198,13 +237,23 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
         int8_t next_command = 0u;
         /* check saber address and motor id, compare with CAN ID */
         if (driver_id_correct(can_id, saber_address, cmd)){
+            if (payload > 128u) return; // input sanitization
             /* extract the command type and the payload */
             if (cmd == 0 || cmd == 4){ /* Drive forward motor */
                 /* 7bit magnitudine, positive */
+                next_command = (int8_t)payload; // this should already be 7 bits
             } else if (cmd == 1 || cmd == 5){ /* Drive backwards motor */
                 /* 7bit magnitude, negative */
+                next_command = -((int8_t)payload);
             } else if (cmd == 6 || cmd == 7){ /* Drive motor 7 bit */
                 /* 0 is full reverse, 127 full forward, 64 is stop */
+                if (payload > 64u){
+                    // add 1 to adjust values to get 100%
+                    next_command = ((int8_t)payload - 64) * 2 + 1;
+                }
+                else{
+                    next_command = ((int8_t)payload - 64) * 2;
+                }
             }
             else {
                 /* Panic! Invalid command. */
@@ -217,8 +266,6 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
             /* the current command needs to be changed */
             crt_command = next_command;
             chSysLockFromISR();
-            /*TODO: write eventmask with either 1 or 2, depending on control mode
-             (duty-cycle for brushed, RPM for BLDC) */
             chEvtSignalI(process_tp, (eventmask_t) 1);
             chSysUnlockFromISR();
         }
@@ -249,7 +296,10 @@ void app_custom_stop(void) {
 
 void app_custom_configure(app_configuration *conf) {
     (void)conf;
-    /* TODO: read the current motor configuration, save mc_motor_type */
+    mc_configuration* mcconf = mc_interface_get_configuration();
+    motortype = mcconf->motor_type;
+    controlled_id = conf->controller_id;
+    /* TODO: save the rpm scale coefficient from conf */
 }
 
 static THD_FUNCTION(saber_process_thread, arg) {
@@ -267,7 +317,19 @@ static THD_FUNCTION(saber_process_thread, arg) {
             mc_interface_brake_now();
         }
         else{
-            
+            if (motortype == MOTOR_TYPE_DC){
+                /* duty-cycle control */
+                float duty = ((float)crt_command) * MOTOR_DUTY_SCALE;
+                // make sure commands are in a valid range 
+                if (duty > 1.0) duty = 1.0;
+                else if (duty < 1.0) duty = -1.0;
+                mc_interface_set_duty(duty); /* note: the fact that only floats can be used for duty-cycle is very, very sad */
+            }
+            else {
+                /* rpm control */
+                int32_t rpm = ((int32_t)crt_command) * (int32_t)MOTOR_RPM_SCALE;
+                mc_interface_set_pid_speed(rpm);
+            }
         }
     }
 }
