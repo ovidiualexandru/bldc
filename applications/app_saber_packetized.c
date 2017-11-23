@@ -113,6 +113,9 @@ received char. Also, we'll use a pull-down for safety reasons.
 #include "mc_interface.h"
 #include "datatypes.h"
 
+// Settings
+#define BAUDRATE					115200
+
 /* checksum mask defined for the saber protocol */
 #define CHECKSUM_MASK (0x7Fu)
 
@@ -180,12 +183,12 @@ static bool driver_id_correct(uint8_t can_id, uint8_t saber_address, uint8_t cmd
     uint8_t z = can_id >> 1u; // remove the LSB
     if (x == z){
         if ((y == 0u) && 
-                ((cmd == 0u) || (cmd == 1u) || (cmd == 7u) || )
+                ((cmd == 0u) || (cmd == 1u) || (cmd == 7u))
             ){
             return true;
         }
         if ((y == 1u) && 
-                ((cmd == 4u) || (cmd == 5u) || (cmd == 6u) || )
+                ((cmd == 4u) || (cmd == 5u) || (cmd == 6u))
             ){
             return true;
         }
@@ -218,6 +221,14 @@ static void rxerr(UARTDriver *uartp, uartflags_t e) {
 	(void)uartp;
 	(void)e;
 }
+
+/*
+ * This callback is invoked when a receive buffer has been completely written.
+ */
+static void rxend(UARTDriver *uartp) {
+	(void)uartp;
+}
+
 /*
  * This callback is invoked when a character is received but the application
  * was not ready to receive it, the character is passed as parameter.
@@ -236,7 +247,7 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
         uint8_t payload = buff[id];
         int8_t next_command = 0u;
         /* check saber address and motor id, compare with CAN ID */
-        if (driver_id_correct(can_id, saber_address, cmd)){
+        if (driver_id_correct(controlled_id, saber_address, cmd)){
             if (payload > 127u) return; // input sanitization
             /* extract the command type and the payload */
             if (cmd == 0 || cmd == 4){ /* Drive forward motor */
