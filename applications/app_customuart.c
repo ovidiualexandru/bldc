@@ -129,7 +129,7 @@ static float get_dutycycle_info_from_saber_char(uint8_t c)
     float cmd = ((float)x) * MOTOR_DUTY_SCALE;
     // make sure commands are in a valid range 
     if (cmd > 1.0) cmd = 1.0;
-    if (cmd < 1.0) cmd = -1.0;
+    if (cmd < -1.0) cmd = -1.0;
     return cmd;
 }
 
