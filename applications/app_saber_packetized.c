@@ -237,7 +237,7 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
         int8_t next_command = 0u;
         /* check saber address and motor id, compare with CAN ID */
         if (driver_id_correct(can_id, saber_address, cmd)){
-            if (payload > 128u) return; // input sanitization
+            if (payload > 127u) return; // input sanitization
             /* extract the command type and the payload */
             if (cmd == 0 || cmd == 4){ /* Drive forward motor */
                 /* 7bit magnitudine, positive */
@@ -322,7 +322,7 @@ static THD_FUNCTION(saber_process_thread, arg) {
                 float duty = ((float)crt_command) * MOTOR_DUTY_SCALE;
                 // make sure commands are in a valid range 
                 if (duty > 1.0) duty = 1.0;
-                else if (duty < 1.0) duty = -1.0;
+                else if (duty < -1.0) duty = -1.0;
                 mc_interface_set_duty(duty); /* note: the fact that only floats can be used for duty-cycle is very, very sad */
             }
             else {
