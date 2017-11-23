@@ -136,6 +136,7 @@ static uint8_t buff_idx; /* Buffer pointer: next index to write in the buffer */
 static volatile mc_motor_type motortype = MOTOR_TYPE_DC; /* save motor type */
 static volatile uint8_t controlled_id; /* can id */
 static volatile int8_t crt_command; /* store the current command */
+static volatile bool is_running = false;
 
 /* Thread */
 static THD_FUNCTION(saber_process_thread, arg);
@@ -150,7 +151,7 @@ static bool valid_checksum(void)
     /* buff_idx indicates where the next char will be saved, but also shows where
        the oldest char is, so we start from there */
     uint8_t idx = buff_idx;
-    uint8_t sum;
+    uint8_t sum = 0u;
     uint8_t i;
     bool chk = false;
     /* Iterate over the first three chars, and verify checksum */
@@ -299,6 +300,19 @@ static UARTConfig uart_cfg = {
 };
 
 void app_custom_start(void) {
+    if (!is_running) {
+        chThdCreateStatic(saber_process_thread_wa, sizeof(saber_process_thread_wa),
+                NORMALPRIO, saber_process_thread, NULL);
+        is_running = true;
+    }
+
+    uartStart(&HW_UART_DEV, &uart_cfg);
+    palSetPadMode(HW_UART_TX_PORT, HW_UART_TX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
+            PAL_STM32_OSPEED_HIGHEST |
+            PAL_STM32_PUDR_PULLUP);
+    palSetPadMode(HW_UART_RX_PORT, HW_UART_RX_PIN, PAL_MODE_ALTERNATE(HW_UART_GPIO_AF) |
+            PAL_STM32_OSPEED_HIGHEST |
+            PAL_STM32_PUDR_PULLUP);
 }
 
 void app_custom_stop(void) {
@@ -307,9 +321,14 @@ void app_custom_stop(void) {
 
 void app_custom_configure(app_configuration *conf) {
     (void)conf;
-    mc_configuration* mcconf = mc_interface_get_configuration();
+    const volatile mc_configuration* mcconf = mc_interface_get_configuration();
     motortype = mcconf->motor_type;
     controlled_id = conf->controller_id;
+    // use the baudrate set from the VESC tool for UART
+    uart_cfg.speed = conf->app_uart_baudrate;
+    if (is_running) {
+        uartStart(&HW_UART_DEV, &uart_cfg);
+    }
     /* TODO: save the rpm scale coefficient from conf */
 }
 
