@@ -1,9 +1,9 @@
 /*
-	Copyright 2017 Ovidiu Alexandru ovidiu.marius.alexandru@gmail.com
+    Copyright 2017 Ovidiu Alexandru ovidiu.marius.alexandru@gmail.com
 
-	This file is part of the VESC firmware.
+    This file is part of the VESC firmware.
 
-	The VESC firmware is free software: you can redistribute it and/or modify
+    The VESC firmware is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
     the Free Software Foundation, either version 3 of the License, or
     (at your option) any later version.
@@ -114,7 +114,7 @@ received char. Also, we'll use a pull-down for safety reasons.
 #include "datatypes.h"
 
 // Settings
-#define BAUDRATE					115200
+#define BAUDRATE 115200
 
 /* checksum mask defined for the saber protocol */
 #define CHECKSUM_MASK (0x7Fu)
@@ -203,14 +203,14 @@ static bool driver_id_correct(uint8_t can_id, uint8_t saber_address, uint8_t cmd
  * read by the driver.
  */
 static void txend1(UARTDriver *uartp) {
-	(void)uartp;
+    (void)uartp;
 }
 
 /*
  * This callback is invoked when a transmission has physically completed.
  */
 static void txend2(UARTDriver *uartp) {
-	(void)uartp;
+    (void)uartp;
 }
 
 /*
@@ -218,15 +218,15 @@ static void txend2(UARTDriver *uartp) {
  * as parameter.
  */
 static void rxerr(UARTDriver *uartp, uartflags_t e) {
-	(void)uartp;
-	(void)e;
+    (void)uartp;
+    (void)e;
 }
 
 /*
  * This callback is invoked when a receive buffer has been completely written.
  */
 static void rxend(UARTDriver *uartp) {
-	(void)uartp;
+    (void)uartp;
 }
 
 /*
@@ -235,7 +235,7 @@ static void rxend(UARTDriver *uartp) {
  */
 static void rxchar(UARTDriver *uartp, uint16_t c) {
     /* Process the characted */
-	(void)uartp;
+    (void)uartp;
     buff_add_char((uint8_t)c);
     if(valid_checksum()){
         /* Nice, we received a valid data packet, process it */
@@ -287,15 +287,15 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
  * UART driver configuration structure.
  */
 static UARTConfig uart_cfg = {
-		txend1,
-		txend2,
-		rxend,
-		rxchar,
-		rxerr,
-		BAUDRATE,
-		0,
-		USART_CR2_LINEN,
-		0
+        txend1,
+        txend2,
+        rxend,
+        rxchar,
+        rxerr,
+        BAUDRATE,
+        0,
+        USART_CR2_LINEN,
+        0
 };
 
 void app_custom_start(void) {
@@ -314,14 +314,14 @@ void app_custom_configure(app_configuration *conf) {
 }
 
 static THD_FUNCTION(saber_process_thread, arg) {
-	(void)arg;
+    (void)arg;
 
-	chRegSetThreadName("Saber packetized");
+    chRegSetThreadName("Saber packetized");
 
-	process_tp = chThdGetSelfX();
+    process_tp = chThdGetSelfX();
 
-	for(;;) {
-		chEvtWaitAny((eventmask_t) 1);
+    for(;;) {
+        chEvtWaitAny((eventmask_t) 1);
         
         if (crt_command == 0){
             /* set the brakes */
