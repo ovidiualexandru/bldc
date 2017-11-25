@@ -121,7 +121,7 @@ received char. Also, we'll use a pull-down for safety reasons.
 
 /* duty-cycle definitions */
 #define DRIVER_COMM_OFFSET (64) // subtract this value to center on zero
-#define MOTOR_DUTY_SCALE (1.0 / 63) // scale from byte command to floats
+#define MOTOR_DUTY_SCALE (1.0 / 127.0) // scale from byte command to floats
 
 /* rpm control definitions */
 #define MOTOR_RPM_SCALE (126) // TODO: this should be configurable
@@ -237,7 +237,7 @@ static void rxend(UARTDriver *uartp) {
 static void rxchar(UARTDriver *uartp, uint16_t c) {
     /* Process the characted */
     (void)uartp;
-    buff_add_char((uint8_t)c);
+    buff_add_char((uint8_t)(c & 0xFFu));
     if(valid_checksum()){
         /* Nice, we received a valid data packet, process it */
         uint8_t id = buff_idx; // now buff_idx will be pointing to the first element of the data packet, the driver address
@@ -246,7 +246,7 @@ static void rxchar(UARTDriver *uartp, uint16_t c) {
         uint8_t cmd = buff[id];
         id = BUFFER_INC_IDX(id);
         uint8_t payload = buff[id];
-        int8_t next_command = 0u;
+        int8_t next_command = crt_command;
         /* check saber address and motor id, compare with CAN ID */
         if (driver_id_correct(controlled_id, saber_address, cmd)){
             if (payload > 127u) return; // input sanitization
