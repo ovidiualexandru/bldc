@@ -44,17 +44,12 @@ is documented as being for motor 1 and command 7 for motor 2.
  Since Sabertooth 2x60 is a dual-channel motor driver and VESC is single-channel,
 we'll use the VESC CAN ID to indicate if the current VESC is for Motor 1 or Motor 2.
 We'll use:
- CAN ID = 0 for Motor 1
- CAN ID != 0 for Motor 2
-The default address is fixed at 128. A potential extension is described below.
-----
-    TODO: extend the CAN ID usage for multiple Saber addresses. Example:
     CAN_ID = 0 -> Saber 128, M1
     CAN_ID = 1 -> Saber 128, M2
     CAN_ID = 2 -> Saber 129, M1
     CAN_ID = 3 -> Saber 129, M2
     and so on...
-----
+
 
 = Implementation
 ----------------
@@ -95,6 +90,7 @@ saved, and wake-up the thread only if they are different.
  | Decode cmd and send|
  |_to VESC____________|
 
+TODO: implement E-Stop described below and timeouts properly.
 == E-Stop
 ---------
 The Saber driver uses the Tx pin as an E-Stop input. If the input is at logic
@@ -120,7 +116,6 @@ received char. Also, we'll use a pull-down for safety reasons.
 #define CHECKSUM_MASK (0x7Fu)
 
 /* duty-cycle definitions */
-#define DRIVER_COMM_OFFSET (64) // subtract this value to center on zero
 #define MOTOR_DUTY_SCALE (1.0 / 127.0) // scale from byte command to floats
 
 /* rpm control definitions */
@@ -179,16 +174,16 @@ static void buff_add_char(uint8_t c)
 static bool driver_id_correct(uint8_t can_id, uint8_t saber_address, uint8_t cmd)
 {
     if (saber_address < 128u) return false; //input sanitization
-    uint8_t x = saber_address - 128u;
-    uint8_t y = can_id & 1u; //M1 is for CAN IS LSB = 0, M2 is for CAN ID LSB = 1
-    uint8_t z = can_id >> 1u; // remove the LSB
-    if (x == z){
-        if ((y == 0u) && 
+    uint8_t internal_address = saber_address - 128u;
+    uint8_t can_lsb = can_id & 1u; //M1 is for CAN IS LSB = 0, M2 is for CAN ID LSB = 1
+    uint8_t can_internal_address = can_id >> 1u; // remove the LSB
+    if (internal_address == can_internal_address){
+        if ((can_lsb == 0u) && 
                 ((cmd == 0u) || (cmd == 1u) || (cmd == 7u))
             ){
             return true;
         }
-        if ((y == 1u) && 
+        if ((can_lsb == 1u) && 
                 ((cmd == 4u) || (cmd == 5u) || (cmd == 6u))
             ){
             return true;
