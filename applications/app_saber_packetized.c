@@ -90,7 +90,7 @@ saved, and wake-up the thread only if they are different.
  | Decode cmd and send|
  |_to VESC____________|
 
-TODO: implement E-Stop described below and timeouts properly.
+TODO: implement E-Stop described below.
 == E-Stop
 ---------
 The Saber driver uses the Tx pin as an E-Stop input. If the input is at logic
@@ -100,6 +100,9 @@ disconnected, it defaults to '1' via an internal pull-up.
 Instead of using the asyncronous read of the E-Stop pin, we will check it at every
 received char. Also, we'll use a pull-down for safety reasons.
 
+TODO: use vesc timeouts properly. In this implementation, the timeout must be set to
+a very high value to avoid unwanted stopping. But the timeout should be used for safety
+reasons.
 */
 
 #include "app.h"
@@ -128,7 +131,6 @@ received char. Also, we'll use a pull-down for safety reasons.
 static uint8_t buff[BUFFER_LEN]; /* The circular buffer */
 static uint8_t buff_idx; /* Buffer pointer: next index to write in the buffer */
 
-static volatile mc_motor_type motortype = MOTOR_TYPE_DC; /* save motor type */
 static volatile uint8_t controlled_id; /* can id */
 static volatile int8_t crt_command; /* store the current command */
 static volatile bool is_running = false;
@@ -321,8 +323,6 @@ void app_custom_stop(void) {
 
 void app_custom_configure(app_configuration *conf) {
     (void)conf;
-    const volatile mc_configuration* mcconf = mc_interface_get_configuration();
-    motortype = mcconf->motor_type;
     controlled_id = conf->controller_id;
     // use the baudrate set from the VESC tool for UART
     uart_cfg.speed = conf->app_uart_baudrate;
@@ -341,13 +341,16 @@ static THD_FUNCTION(saber_process_thread, arg) {
 
     for(;;) {
         chEvtWaitAny((eventmask_t) 1);
-        
+
+        /* get a reference to the current motor configuration so we can read the motor type */
+        const volatile mc_configuration* mcconf = mc_interface_get_configuration();
+
         if (crt_command == 0){
             /* set the brakes */
             mc_interface_brake_now();
         }
         else{
-            if (motortype == MOTOR_TYPE_DC){
+            if (mcconf->motor_type == MOTOR_TYPE_DC){
                 /* duty-cycle control */
                 float duty = ((float)crt_command) * MOTOR_DUTY_SCALE;
                 // make sure commands are in a valid range 
