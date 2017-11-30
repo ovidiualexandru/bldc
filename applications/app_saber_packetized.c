@@ -363,6 +363,7 @@ static THD_FUNCTION(saber_process_thread, arg) {
                 int32_t rpm = ((int32_t)crt_command) * (int32_t)MOTOR_RPM_SCALE;
                 mc_interface_set_pid_speed(rpm);
             }
+            timeout_reset();
         }
     }
 }

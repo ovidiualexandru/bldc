@@ -237,6 +237,7 @@ static THD_FUNCTION(saber_process_thread, arg) {
 #else
         mc_interface_set_duty(duty);
 #endif
+        timeout_reset();
 #ifdef APP_CUSTOMUART_DEBUG
         static uint8_t buffer[3] = "r\n";
         while (HW_UART_DEV.txstate == UART_TX_ACTIVE) {
